@@ -10,6 +10,13 @@ interface Props {
   onAnalyze: (input: DayInput) => void;
 }
 
+const TIME_OPTIONS: { value: NonNullable<DayInput["studyTimeOfDay"]>; label: string }[] = [
+  { value: "morning", label: "Morning" },
+  { value: "afternoon", label: "Afternoon" },
+  { value: "evening", label: "Evening" },
+  { value: "night", label: "Night" },
+];
+
 export function DailyForm({ onAnalyze }: Props) {
   const [studyHours, setStudyHours] = useState(4);
   const [breakMinutes, setBreakMinutes] = useState(20);
@@ -18,10 +25,11 @@ export function DailyForm({ onAnalyze }: Props) {
   const [sleepHours, setSleepHours] = useState(7);
   const [stressLevel, setStressLevel] = useState(5);
   const [motivationLevel, setMotivationLevel] = useState(7);
+  const [studyTimeOfDay, setStudyTimeOfDay] = useState<DayInput["studyTimeOfDay"]>("afternoon");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onAnalyze({ studyHours, breakMinutes, distractionMinutes, focusLevel, sleepHours, stressLevel, motivationLevel });
+    onAnalyze({ studyHours, breakMinutes, distractionMinutes, focusLevel, sleepHours, stressLevel, motivationLevel, studyTimeOfDay });
   };
 
   return (
@@ -36,6 +44,26 @@ export function DailyForm({ onAnalyze }: Props) {
         <NumField label="Sleep last night (hrs)" value={sleepHours} onChange={setSleepHours} step={0.5} max={14} />
         <NumField label="Break time (min)" value={breakMinutes} onChange={setBreakMinutes} step={5} max={600} />
         <NumField label="Distraction time (min)" value={distractionMinutes} onChange={setDistractionMinutes} step={5} max={600} />
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">Main study time of day</Label>
+        <div className="grid grid-cols-4 gap-2">
+          {TIME_OPTIONS.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setStudyTimeOfDay(t.value)}
+              className={`px-3 py-2 rounded-xl text-xs font-medium transition-all border ${
+                studyTimeOfDay === t.value
+                  ? "gradient-bg text-primary-foreground border-transparent shadow-[var(--shadow-glow)]"
+                  : "bg-background/60 backdrop-blur border-border hover:border-primary/40"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-5">
