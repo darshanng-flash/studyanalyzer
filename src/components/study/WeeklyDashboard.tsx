@@ -1,11 +1,23 @@
-import type { DayRecord } from "@/lib/study-analytics";
+import { useRef } from "react";
+import type { DayRecord, LevelInfo, WeeklyStats } from "@/lib/study-analytics";
 import { computeWeeklyStats, dayName, getLast7Days } from "@/lib/study-analytics";
-import { Award, Calendar, Flame, Sparkles, TrendingDown, TrendingUp } from "lucide-react";
+import { Award, Brain, Calendar, Clock, Compass, Download, Flame, Sparkles, TrendingDown, TrendingUp, Zap, AlertTriangle } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Button } from "@/components/ui/button";
+import { AnimatedNumber } from "./AnimatedNumber";
+import { exportWeeklyReport } from "@/lib/pdf-report";
+import { toast } from "sonner";
 
-export function WeeklyDashboard({ records }: { records: DayRecord[] }) {
+interface Props {
+  records: DayRecord[];
+  level: LevelInfo;
+  totalXP: number;
+}
+
+export function WeeklyDashboard({ records, level, totalXP }: Props) {
   const stats = computeWeeklyStats(records);
   const week = getLast7Days(records);
+  const chartsRef = useRef<HTMLDivElement>(null);
 
   if (!stats) {
     return (
@@ -17,42 +29,84 @@ export function WeeklyDashboard({ records }: { records: DayRecord[] }) {
     );
   }
 
-  const lineData = week.map((r) => ({ day: dayName(r.date), efficiency: r.efficiency }));
-  const barData = week.map((r) => ({ day: dayName(r.date), hours: r.studyHours }));
+  const lineData = week.map((r) => ({ day: dayName(r.date), efficiency: r.efficiency, isBest: r.date === stats.bestDay?.date, isWorst: r.date === stats.worstDay?.date }));
+  const barData = week.map((r) => ({ day: dayName(r.date), hours: r.studyHours, isBest: r.date === stats.bestDay?.date }));
   const pieData = [
     { name: "Productive", value: stats.totalProductiveMinutes, color: "hsl(var(--primary))" },
     { name: "Break", value: stats.totalBreakMinutes, color: "hsl(var(--accent))" },
     { name: "Distraction", value: stats.totalDistractionMinutes, color: "hsl(var(--destructive))" },
   ].filter((d) => d.value > 0);
 
-  const tooltipStyle = { background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "0.75rem" };
+  const tooltipStyle = { background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: "0.75rem", color: "hsl(var(--foreground))" };
+
+  const handleExport = async () => {
+    toast("Generating your PDF report…");
+    try {
+      await exportWeeklyReport({ stats, level, totalXP, records, chartContainer: chartsRef.current });
+      toast.success("Report downloaded");
+    } catch (e) {
+      console.error(e);
+      toast.error("Could not generate report");
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Performance label + streak */}
-      <div className="glass-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Burnout alert */}
+      {stats.avgBurnout >= 2.5 && (
+        <div className="glass-card p-5 border-l-4 border-destructive bg-destructive/5 animate-fade-in">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-destructive mt-0.5" />
+            <div>
+              <h4 className="font-semibold text-destructive">⚠️ You're approaching burnout</h4>
+              <p className="text-sm text-muted-foreground mt-1">
+                Recovery moves: take a lighter day, sleep 8h, reduce study load by 30%, and skip one session today.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Performance label + streak + export */}
+      <div className="glass-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:shadow-[var(--shadow-glow)] transition-shadow">
         <div>
           <p className="text-xs uppercase tracking-wider text-muted-foreground font-medium">This Week</p>
-          <h2 className="text-3xl font-bold gradient-text mt-1">{stats.performanceLabel}</h2>
+          <h2 className="text-3xl font-bold gradient-text mt-1 flex items-center gap-2">
+            {stats.performanceLabel}
+            {stats.trend === "up" && <TrendingUp className="h-6 w-6 text-success" />}
+            {stats.trend === "down" && <TrendingDown className="h-6 w-6 text-destructive" />}
+          </h2>
         </div>
-        <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-secondary/60 backdrop-blur">
-          <Flame className="h-5 w-5 text-warning" />
-          <span className="font-semibold">{stats.streak}-day streak</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-secondary/60 backdrop-blur">
+            <Flame className="h-5 w-5 text-warning" />
+            <span className="font-semibold">{stats.streak}-day streak</span>
+          </div>
+          <Button onClick={handleExport} className="gradient-bg text-primary-foreground hover:opacity-90">
+            <Download className="h-4 w-4 mr-2" /> Download Report
+          </Button>
         </div>
       </div>
 
-      {/* Stats grid */}
+      {/* Stats grid with animated numbers */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <Stat label="Avg Efficiency" value={`${stats.avgEfficiency}%`} />
-        <Stat label="Avg Burnout" value={stats.avgBurnout.toFixed(1)} />
-        <Stat label="Study Hours" value={`${stats.totalStudyHours}h`} />
-        <Stat label="Productive" value={`${Math.round(stats.totalProductiveMinutes / 60)}h`} />
-        <Stat label="Distraction" value={`${Math.round(stats.totalDistractionMinutes / 60)}h`} />
+        <Stat label="Avg Efficiency" value={stats.avgEfficiency} suffix="%" />
+        <Stat label="Avg Burnout" value={stats.avgBurnout} decimals={1} />
+        <Stat label="Study Hours" value={stats.totalStudyHours} suffix="h" decimals={1} />
+        <Stat label="Consistency" value={stats.consistencyScore} suffix="/100" />
+        <Stat label="Distraction" value={Math.round(stats.totalDistractionMinutes / 60)} suffix="h" />
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="glass-card p-6">
+      {/* Pattern insights row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <PatternCard icon={<Brain className="h-5 w-5" />} label="Personality" value={stats.personality} />
+        <PatternCard icon={<Clock className="h-5 w-5" />} label="Best Time" value={stats.bestTimeWindow} />
+        <PatternCard icon={<Compass className="h-5 w-5" />} label="Prediction" value={stats.prediction} />
+      </div>
+
+      {/* Charts (ref'd for PDF snapshot) */}
+      <div ref={chartsRef} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="glass-card p-6 hover:shadow-[var(--shadow-glow)] transition-shadow">
           <h3 className="font-semibold mb-4">Efficiency Trend</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -67,13 +121,24 @@ export function WeeklyDashboard({ records }: { records: DayRecord[] }) {
                 <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} domain={[0, 100]} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Line type="monotone" dataKey="efficiency" stroke="url(#lineGrad)" strokeWidth={3} dot={{ fill: "hsl(var(--primary))", r: 5 }} activeDot={{ r: 7 }} />
+                <Line
+                  type="monotone" dataKey="efficiency" stroke="url(#lineGrad)" strokeWidth={3}
+                  dot={(props: any) => {
+                    const { cx, cy, payload } = props;
+                    const r = payload.isBest ? 7 : payload.isWorst ? 7 : 5;
+                    const fill = payload.isBest ? "hsl(var(--success))" : payload.isWorst ? "hsl(var(--destructive))" : "hsl(var(--primary))";
+                    return <circle key={`dot-${cx}-${cy}`} cx={cx} cy={cy} r={r} fill={fill} stroke="hsl(var(--background))" strokeWidth={2} />;
+                  }}
+                  activeDot={{ r: 8 }}
+                  isAnimationActive
+                  animationDuration={900}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="glass-card p-6">
+        <div className="glass-card p-6 hover:shadow-[var(--shadow-glow)] transition-shadow">
           <h3 className="font-semibold mb-4">Daily Study Hours</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -82,18 +147,22 @@ export function WeeklyDashboard({ records }: { records: DayRecord[] }) {
                 <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" fontSize={12} />
                 <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="hours" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="hours" radius={[8, 8, 0, 0]} animationDuration={900}>
+                  {barData.map((d, i) => (
+                    <Cell key={i} fill={d.isBest ? "hsl(var(--success))" : "hsl(var(--primary))"} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="glass-card p-6 lg:col-span-2">
+        <div className="glass-card p-6 lg:col-span-2 hover:shadow-[var(--shadow-glow)] transition-shadow">
           <h3 className="font-semibold mb-4">Weekly Time Allocation</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={100} paddingAngle={3}>
+                <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={100} paddingAngle={3} animationDuration={900}>
                   {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
                 </Pie>
                 <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => `${Math.round(v)} min`} />
@@ -114,7 +183,7 @@ export function WeeklyDashboard({ records }: { records: DayRecord[] }) {
       {/* Best / Worst */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {stats.bestDay && (
-          <div className="glass-card p-5">
+          <div className="glass-card p-5 hover:scale-[1.01] transition-transform">
             <div className="flex items-center gap-2 text-success font-medium text-sm">
               <Award className="h-4 w-4" /> Best Day
             </div>
@@ -123,7 +192,7 @@ export function WeeklyDashboard({ records }: { records: DayRecord[] }) {
           </div>
         )}
         {stats.worstDay && (
-          <div className="glass-card p-5">
+          <div className="glass-card p-5 hover:scale-[1.01] transition-transform">
             <div className="flex items-center gap-2 text-destructive font-medium text-sm">
               <TrendingDown className="h-4 w-4" /> Learning Opportunity
             </div>
@@ -133,7 +202,7 @@ export function WeeklyDashboard({ records }: { records: DayRecord[] }) {
         )}
       </div>
 
-      {/* Weekly insights + summary */}
+      {/* Weekly insights */}
       <div className="glass-card p-6">
         <h3 className="font-semibold flex items-center gap-2 mb-3">
           <TrendingUp className="h-5 w-5 text-primary" /> Weekly Insights
@@ -147,21 +216,43 @@ export function WeeklyDashboard({ records }: { records: DayRecord[] }) {
         </ul>
       </div>
 
-      <div className="glass-card p-6 bg-gradient-to-br from-primary/5 to-accent/5">
-        <h3 className="font-semibold flex items-center gap-2 mb-3">
-          <Sparkles className="h-5 w-5 text-primary" /> AI Weekly Summary
-        </h3>
-        <p className="text-base leading-relaxed">{stats.weeklySummary}</p>
+      {/* Encouragement + Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="glass-card p-6 bg-gradient-to-br from-primary/10 to-accent/10">
+          <h3 className="font-semibold flex items-center gap-2 mb-2">
+            <Zap className="h-5 w-5 text-primary" /> Weekly Encouragement
+          </h3>
+          <p className="text-base leading-relaxed">{stats.weeklyEncouragement}</p>
+        </div>
+        <div className="glass-card p-6">
+          <h3 className="font-semibold flex items-center gap-2 mb-2">
+            <Sparkles className="h-5 w-5 text-primary" /> AI Weekly Summary
+          </h3>
+          <p className="text-sm leading-relaxed">{stats.weeklySummary}</p>
+        </div>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, suffix = "", decimals = 0 }: { label: string; value: number; suffix?: string; decimals?: number }) {
   return (
-    <div className="glass-card p-4">
+    <div className="glass-card p-4 hover:scale-[1.03] transition-transform">
       <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{label}</div>
-      <div className="mt-1 text-2xl font-bold gradient-text">{value}</div>
+      <div className="mt-1 text-2xl font-bold gradient-text">
+        <AnimatedNumber value={value} suffix={suffix} decimals={decimals} />
+      </div>
+    </div>
+  );
+}
+
+function PatternCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="glass-card p-5 hover:scale-[1.02] transition-transform">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider font-medium">
+        <span className="text-primary">{icon}</span>{label}
+      </div>
+      <div className="mt-2 text-base font-semibold">{value}</div>
     </div>
   );
 }
